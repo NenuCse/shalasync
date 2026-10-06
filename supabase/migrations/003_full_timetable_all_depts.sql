@@ -8,9 +8,9 @@
 -- ============================================================
 
 -- ── ADD MISSING ROOMS FROM THE IMAGE ─────────────────────────
+-- Note: room 5112 already exists from 002_seed_data.sql — skipped here.
 INSERT INTO rooms (id, room_number, building, floor, capacity) VALUES
   ('b1000000-0000-0000-0000-000000000017', '4004',   'Main Block',  '4th Floor',  60),
-  ('b1000000-0000-0000-0000-000000000018', '5112',   'Main Block',  '5th Floor',  40),
   ('b1000000-0000-0000-0000-000000000019', '3102',   'Main Block',  '3rd Floor',  60),
   ('b1000000-0000-0000-0000-000000000020', 'WS-C1',  'Workshop',    'Ground',     40),
   ('b1000000-0000-0000-0000-000000000021', 'WS-C2',  'Workshop',    'Ground',     40),
@@ -20,7 +20,7 @@ INSERT INTO rooms (id, room_number, building, floor, capacity) VALUES
   ('b1000000-0000-0000-0000-000000000025', 'WS-M3',  'Workshop',    'Ground',     40),
   ('b1000000-0000-0000-0000-000000000026', 'PHY Lab','Lab Block',   '1st Floor',  40),
   ('b1000000-0000-0000-0000-000000000027', 'SL/LIB', 'Library',     '2nd Floor', 100)
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (room_number) DO NOTHING;
 
 -- ── ADDITIONAL SUBJECTS ───────────────────────────────────────
 -- (Common subjects for all 4 departments Sem-1)

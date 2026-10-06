@@ -21,8 +21,8 @@ const nextConfig: NextConfig = {
     formats: ['image/avif', 'image/webp'],
   },
 
-  // ── HTTP cache headers ────────────────────────────────────
-  // Static assets and pages cached aggressively
+  // ── HTTP security headers ────────────────────────────────
+  // Note: Vercel automatically sets Cache-Control on /_next/static
   headers: async () => [
     {
       source: '/(.*)',
@@ -33,24 +33,12 @@ const nextConfig: NextConfig = {
       ],
     },
     {
-      // Cache static files for 1 year
-      source: '/_next/static/(.*)',
-      headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }],
-    },
-    {
-      // Cache public assets for 1 day
+      // Cache public assets (logo, manifest) for 1 day
       source: '/(logo\\.jpg|manifest\\.json|favicon\\.ico)',
       headers: [{ key: 'Cache-Control', value: 'public, max-age=86400, stale-while-revalidate=3600' }],
     },
   ],
 
-  // ── Turbopack (dev server speed) ─────────────────────────
-  turbopack: {
-    // Resolve aliases so imports are shorter and faster
-    resolveAlias: {
-      '@': './src',
-    },
-  },
 };
 
 export default nextConfig;
