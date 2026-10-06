@@ -27,9 +27,11 @@ export default function AdminSidebar() {
   const router      = useRouter();
   const [open, setOpen]   = useState(false);   // mobile drawer
   const [wide, setWide]   = useState(true);    // desktop collapsed/wide
-  const supabase = createClient();
 
+  // createClient() is called only when logout is triggered (browser only),
+  // NOT at component initialization — prevents build-time prerender errors.
   const handleLogout = async () => {
+    const supabase = createClient();
     await supabase.auth.signOut();
     router.push('/admin/login');
     router.refresh();
