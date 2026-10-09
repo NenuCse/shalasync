@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Image from 'next/image';
 import {
@@ -8,9 +8,6 @@ import {
   MapPin, User, Clock, ArrowRight, Coffee, X, Info
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
-
-// Create supabase client ONCE outside component (not re-created on every render)
-const supabase = createClient();
 
 import type {
   Student, Department, TimetableEntry, SpecialEvent,
@@ -36,6 +33,9 @@ function getLectureProgress(start: string, end: string) {
 export default function StudentDashboard() {
   const { enrollment } = useParams<{ enrollment: string }>();
   const router = useRouter();
+
+  // Create supabase client once per component mount — never at module level
+  const supabase = useMemo(() => createClient(), []);
 
   const [student, setStudent] = useState<Student & { departments?: Department } | null>(null);
   const [timetableEntries, setTimetableEntries] = useState<TimetableEntry[]>([]);
