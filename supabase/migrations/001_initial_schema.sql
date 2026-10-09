@@ -277,8 +277,8 @@ CREATE POLICY "admin_audit_insert" ON audit_logs FOR INSERT TO authenticated WIT
 CREATE POLICY "admin_profiles_select" ON admin_profiles FOR SELECT TO authenticated USING (true);
 CREATE POLICY "admin_profiles_write" ON admin_profiles FOR ALL TO authenticated USING (true);
 
--- Enable realtime
-ALTER PUBLICATION supabase_realtime ADD TABLE timetables;
-ALTER PUBLICATION supabase_realtime ADD TABLE special_events;
-ALTER PUBLICATION supabase_realtime ADD TABLE timetable_overrides;
-ALTER PUBLICATION supabase_realtime ADD TABLE students;
+-- Enable realtime (safe to run even if tables are already in the publication)
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE timetables;       EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE special_events;    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE timetable_overrides; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE students;           EXCEPTION WHEN duplicate_object THEN NULL; END $$;
