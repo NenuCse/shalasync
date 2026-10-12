@@ -237,3 +237,77 @@ export function formatDuration(minutes: number): string {
   if (mins === 0) return `${hours}h`;
   return `${hours}h ${mins}m`;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   GEC PALANPUR — BUILDING & ROOM CODE DECODER
+   Building prefix → Department
+     8xxx → Mining
+     7xxx → Civil
+     5xxx → Mechanical
+     4xxx → Electrical
+     6xxx → Workshop
+     2xxx → Library
+   Hundreds digit → Floor
+     x0xx → Ground Floor
+     x1xx → 1st Floor
+     x2xx → 2nd Floor   (etc.)
+   ════════════════════════════════════════════════════════════ */
+
+export interface RoomInfo {
+  building: string;       // e.g. "Mining Department"
+  buildingShort: string;  // e.g. "Mining"
+  floor: string;          // e.g. "1st Floor" | "Ground Floor"
+  floorNum: number;       // 0, 1, 2 …
+  roomNum: string;        // last 2 digits e.g. "09"
+  emoji: string;          // building emoji
+  isKnown: boolean;
+}
+
+const BUILDING_MAP: Record<number, { name: string; short: string; emoji: string }> = {
+  8: { name: 'Mining Department',      short: 'Mining',      emoji: '⛏️'  },
+  7: { name: 'Civil Department',       short: 'Civil',       emoji: '🏗️'  },
+  5: { name: 'Mechanical Department',  short: 'Mechanical',  emoji: '⚙️'  },
+  4: { name: 'Electrical Department',  short: 'Electrical',  emoji: '⚡'  },
+  6: { name: 'Workshop Building',      short: 'Workshop',    emoji: '🔧'  },
+  2: { name: 'Library',               short: 'Library',     emoji: '📚'  },
+};
+
+export function parseRoomCode(roomCode: string | null | undefined): RoomInfo | null {
+  if (!roomCode) return null;
+  // Strip any non-numeric prefix (e.g. "R-8109" → "8109")
+  const digits = roomCode.replace(/\D/g, '');
+  if (digits.length < 3) return null;
+
+  const firstDigit = parseInt(digits[0], 10);
+  const building = BUILDING_MAP[firstDigit];
+  if (!building) return null;
+
+  // Hundreds digit is the floor (digit at position 1)
+  const floorNum = parseInt(digits[1], 10);
+  const floorLabel =
+    floorNum === 0 ? 'Ground Floor' :
+    floorNum === 1 ? '1st Floor' :
+    floorNum === 2 ? '2nd Floor' :
+    floorNum === 3 ? '3rd Floor' :
+    `${floorNum}th Floor`;
+
+  // Last 2 digits as room number
+  const roomNum = digits.slice(-2).padStart(2, '0');
+
+  return {
+    building: building.name,
+    buildingShort: building.short,
+    floor: floorLabel,
+    floorNum,
+    roomNum,
+    emoji: building.emoji,
+    isKnown: true,
+  };
+}
+
+/** Returns a compact one-line location string, e.g. "⛏️ Mining · 1st Floor · Room 09" */
+export function formatRoomLocation(roomCode: string | null | undefined): string | null {
+  const info = parseRoomCode(roomCode);
+  if (!info) return null;
+  return `${info.emoji} ${info.buildingShort} · ${info.floor} · Room ${info.roomNum}`;
+}

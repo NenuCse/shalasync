@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Image from 'next/image';
 import {
   ChevronLeft, Bell, RefreshCw, WifiOff,
-  MapPin, User, Clock, ArrowRight, Coffee, X, Info
+  MapPin, User, Clock, ArrowRight, Coffee, X, Info, Radio
 } from 'lucide-react';
-import { createClient } from '@/lib/supabase/client';
+import { supabase } from '@/lib/supabase/client';
 
 import type {
   Student, Department, TimetableEntry, SpecialEvent,
@@ -17,7 +17,8 @@ import {
   getCurrentDayName, formatTime, enrichEntries,
   isEventRelevantToStudent, getEventTypeIcon,
   formatDuration, getRemainingMinutes, getMinutesUntilStart,
-  timeToMinutes, getCurrentTimeMinutes, DAYS_OF_WEEK
+  timeToMinutes, getCurrentTimeMinutes, DAYS_OF_WEEK,
+  parseRoomCode
 } from '@/lib/timetable/utils';
 
 interface Notif { id: string; title: string; message: string; type: string; }
@@ -34,8 +35,7 @@ export default function StudentDashboard() {
   const { enrollment } = useParams<{ enrollment: string }>();
   const router = useRouter();
 
-  // Create supabase client once per component mount — never at module level
-  const supabase = useMemo(() => createClient(), []);
+
 
   const [student, setStudent] = useState<Student & { departments?: Department } | null>(null);
   const [timetableEntries, setTimetableEntries] = useState<TimetableEntry[]>([]);
@@ -46,6 +46,7 @@ export default function StudentDashboard() {
   const [selectedDay, setSelectedDay] = useState<DayOfWeek>(getCurrentDayName());
   const [activeTab, setActiveTab] = useState<'today' | 'weekly' | 'updates'>('today');
   const [online, setOnline] = useState(true);
+  const [realtimeStatus, setRealtimeStatus] = useState<'connected' | 'connecting' | 'disconnected'>('connecting');
   const [notifs, setNotifs] = useState<Notif[]>([]);
   const [now, setNow] = useState(new Date());
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
@@ -116,26 +117,33 @@ export default function StudentDashboard() {
   useEffect(() => {
     if (!student) return;
     if (channelRef.current) supabase.removeChannel(channelRef.current);
-    const ch = supabase.channel(`s-${student.id}`)
+
+    const ch = supabase
+      .channel(`student-${student.enrollment_no}-${student.id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'timetables' }, () => {
         addNotif({ title: '📅 Timetable Updated', message: 'Your schedule changed.', type: 'update' });
         loadData();
       })
-      // Listen to ALL changes on special_events (INSERT = new, UPDATE = resolved, DELETE = removed)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'special_events' }, (p) => {
-        if (p.eventType === 'INSERT') {
-          const e = p.new as SpecialEvent;
-          if (isEventRelevantToStudent(e, { department_id: student.department_id, semester: student.semester, class: student.class, batch: student.batch })) {
-            addNotif({ title: `${getEventTypeIcon(e.event_type)} ${e.title}`, message: e.description || 'New update posted.', type: e.event_type });
-          }
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'special_events' }, (p) => {
+        const e = p.new as SpecialEvent;
+        if (isEventRelevantToStudent(e, { department_id: student.department_id, semester: student.semester, class: student.class, batch: student.batch })) {
+          addNotif({ title: `${getEventTypeIcon(e.event_type)} ${e.title}`, message: e.description || 'New update posted.', type: e.event_type });
+          loadData();
         }
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'special_events' }, () => {
         loadData();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'timetable_overrides' }, () => {
         addNotif({ title: '⚡ Live Change', message: 'A lecture was updated.', type: 'update' });
         loadData();
       })
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') setRealtimeStatus('connected');
+        else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') setRealtimeStatus('disconnected');
+        else setRealtimeStatus('connecting');
+      });
+
     channelRef.current = ch;
     return () => { supabase.removeChannel(ch); };
   }, [student]);
@@ -206,10 +214,30 @@ export default function StudentDashboard() {
                   <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-rose-500 badge-pulse" />
                 </button>
               )}
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold"
-                style={{ background: online ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.1)', color: online ? '#34d399' : '#fbbf24', border: `1px solid ${online ? 'rgba(16,185,129,0.25)' : 'rgba(245,158,11,0.25)'}` }}>
-                <span className={`w-1.5 h-1.5 rounded-full ${online ? 'pulse-live bg-emerald-400' : 'bg-amber-400'}`} />
-                <span className="hidden sm:inline">{online ? 'Live' : 'Offline'}</span>
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold"
+                style={{
+                  background: realtimeStatus === 'connected'
+                    ? 'rgba(16,185,129,0.1)'
+                    : realtimeStatus === 'connecting'
+                    ? 'rgba(251,191,36,0.1)'
+                    : 'rgba(244,63,94,0.1)',
+                  color: realtimeStatus === 'connected' ? '#34d399' : realtimeStatus === 'connecting' ? '#fbbf24' : '#f87171',
+                  border: `1px solid ${
+                    realtimeStatus === 'connected'
+                      ? 'rgba(16,185,129,0.25)'
+                      : realtimeStatus === 'connecting'
+                      ? 'rgba(251,191,36,0.25)'
+                      : 'rgba(244,63,94,0.25)'
+                  }`,
+                }}>
+                <span className={`w-1.5 h-1.5 rounded-full ${
+                  realtimeStatus === 'connected' ? 'pulse-live bg-emerald-400'
+                  : realtimeStatus === 'connecting' ? 'bg-amber-400'
+                  : 'bg-rose-400'
+                }`} />
+                <span className="hidden sm:inline">
+                  {realtimeStatus === 'connected' ? 'Live' : realtimeStatus === 'connecting' ? 'Syncing…' : 'Offline'}
+                </span>
               </div>
               <button onClick={loadData} className="btn-ghost p-2 rounded-xl"><RefreshCw className="w-4 h-4" /></button>
             </div>
@@ -373,6 +401,7 @@ function CurrentCard({ entry }: { entry: EnrichedTimetableEntry }) {
   const et = entry.override?.new_end_time || entry.end_time;
   const prog = getLectureProgress(st, et);
   const rem  = getRemainingMinutes(et);
+  const roomInfo = parseRoomCode(room?.room_number);
 
   return (
     <div className="bento-live p-5 animate-slide-up">
@@ -426,9 +455,24 @@ function CurrentCard({ entry }: { entry: EnrichedTimetableEntry }) {
         </div>
       </div>
 
+      {/* Building / floor info */}
+      {roomInfo && (
+        <div className="mt-3 flex items-center gap-2 text-xs px-3 py-2.5 rounded-xl"
+          style={{ background: 'rgba(177,178,255,0.08)', border: '1px solid rgba(177,178,255,0.18)', color: 'var(--text-secondary)' }}>
+          <span style={{ fontSize: 16 }}>{roomInfo.emoji}</span>
+          <div>
+            <span className="font-black" style={{ color: 'var(--text-primary)' }}>{roomInfo.building}</span>
+            <span style={{ margin: '0 6px', opacity: 0.4 }}>·</span>
+            <span style={{ color: '#B1B2FF' }}>{roomInfo.floor}</span>
+            <span style={{ margin: '0 6px', opacity: 0.4 }}>·</span>
+            Room {roomInfo.roomNum}
+          </div>
+        </div>
+      )}
+
       {/* Override notes */}
       {entry.override?.new_room_id && entry.override.rooms && (
-        <div className="mt-3 flex items-center gap-2 text-xs px-3 py-2 rounded-xl"
+        <div className="mt-2 flex items-center gap-2 text-xs px-3 py-2 rounded-xl"
           style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)', color: '#fbbf24' }}>
           <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
           Room changed: <strong>{entry.rooms?.room_number}</strong> → <strong>{entry.override.rooms.room_number}</strong>
@@ -468,6 +512,7 @@ function NextCard({ entry }: { entry: EnrichedTimetableEntry }) {
   const prof = entry.override?.new_professor_id ? entry.override.professors : entry.professors;
   const st   = entry.override?.new_start_time || entry.start_time;
   const minsUntil = getMinutesUntilStart(st);
+  const roomInfo = parseRoomCode(room?.room_number);
 
   return (
     <div className="bento-card bento-amber p-4 flex items-center justify-between gap-4 animate-slide-up anim-delay-1">
@@ -481,7 +526,15 @@ function NextCard({ entry }: { entry: EnrichedTimetableEntry }) {
         </div>
         <div className="flex flex-wrap items-center gap-3 mt-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
           {prof?.name && <span className="flex items-center gap-1"><User className="w-3 h-3" />{prof.name}</span>}
-          {room?.room_number && <span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{room.room_number}</span>}
+          {room?.room_number && (
+            <span className="flex items-center gap-1">
+              <MapPin className="w-3 h-3" />
+              {roomInfo
+                ? <>{room.room_number} <span style={{ opacity: 0.6 }}>·</span> {roomInfo.emoji} {roomInfo.buildingShort} · {roomInfo.floor}</>
+                : room.room_number
+              }
+            </span>
+          )}
           <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{formatTime(st)}</span>
         </div>
       </div>
@@ -503,6 +556,7 @@ function ScheduleList({ entries }: { entries: EnrichedTimetableEntry[] }) {
         const et   = ov?.new_end_time   || entry.end_time;
         const isActive = entry.isCurrentLecture;
         const isNext   = entry.isNextLecture;
+        const roomInfo = parseRoomCode(room?.room_number);
 
         if (entry.entry_type === 'break') return (
           <div key={entry.id} className="flex items-center gap-3 px-4 py-2.5" style={{ borderTop: i > 0 ? '1px solid var(--border-subtle)' : 'none' }}>
@@ -549,8 +603,24 @@ function ScheduleList({ entries }: { entries: EnrichedTimetableEntry[] }) {
               </div>
               <div className="flex flex-wrap items-center gap-2 mt-0.5 text-xs" style={{ color: 'var(--text-secondary)' }}>
                 {prof?.name && <span className="flex items-center gap-1"><User className="w-3 h-3" />{prof.name}{ov?.new_professor_id && <span style={{ color: '#fbbf24' }}>*</span>}</span>}
-                {room?.room_number && <span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{room.room_number}{ov?.new_room_id && <span style={{ color: '#fbbf24' }}>*</span>}</span>}
+                {room?.room_number && (
+                  <span className="flex items-center gap-1">
+                    <MapPin className="w-3 h-3" />
+                    {room.room_number}
+                    {ov?.new_room_id && <span style={{ color: '#fbbf24' }}>*</span>}
+                  </span>
+                )}
               </div>
+              {/* Building / floor tag */}
+              {roomInfo && (
+                <div className="mt-1.5 inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-lg"
+                  style={{ background: 'rgba(177,178,255,0.08)', color: 'var(--text-muted)', border: '1px solid rgba(177,178,255,0.12)' }}>
+                  <span>{roomInfo.emoji}</span>
+                  <span>{roomInfo.buildingShort}</span>
+                  <span style={{ opacity: 0.4 }}>·</span>
+                  <span style={{ color: '#B1B2FF' }}>{roomInfo.floor}</span>
+                </div>
+              )}
               {ov?.reason && (
                 <div className="text-xs mt-1.5 px-2 py-1 rounded-lg" style={{ background: 'rgba(245,158,11,0.08)', color: '#fbbf24' }}>{ov.reason}</div>
               )}
@@ -567,6 +637,8 @@ function EventCard({ event, expanded = false }: { event: SpecialEvent; expanded?
   const icon = getEventTypeIcon(event.event_type);
   const borderColor = event.priority === 'urgent' ? 'rgba(244,63,94,0.4)' : event.priority === 'high' ? 'rgba(245,158,11,0.3)' : 'var(--border-subtle)';
   const bg = event.priority === 'urgent' ? 'rgba(244,63,94,0.07)' : event.priority === 'high' ? 'rgba(245,158,11,0.05)' : 'var(--bg-card)';
+  const oldRoomInfo = parseRoomCode((event.old_rooms as { room_number?: string } | null)?.room_number);
+  const newRoomInfo = parseRoomCode((event.new_rooms as { room_number?: string } | null)?.room_number);
 
   return (
     <div className="rounded-2xl p-4" style={{ background: bg, border: `1px solid ${borderColor}` }}>
@@ -583,11 +655,32 @@ function EventCard({ event, expanded = false }: { event: SpecialEvent; expanded?
           </div>
           {event.description && <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>{event.description}</div>}
           {event.event_type === 'room_change' && event.old_rooms && event.new_rooms && (
-            <div className="flex items-center gap-2 mt-2 text-sm px-3 py-2 rounded-xl" style={{ background: 'rgba(0,0,0,0.2)' }}>
-              <MapPin className="w-3.5 h-3.5 flex-shrink-0 text-amber-400" />
-              <span style={{ textDecoration: 'line-through', color: 'var(--text-muted)' }}>{event.old_rooms.room_number}</span>
-              <ArrowRight className="w-3 h-3" style={{ color: 'var(--text-muted)' }} />
-              <span className="font-black" style={{ color: '#34d399' }}>{event.new_rooms.room_number}</span>
+            <div className="mt-2 space-y-1.5">
+              <div className="flex items-center gap-2 text-sm px-3 py-2 rounded-xl" style={{ background: 'rgba(0,0,0,0.2)' }}>
+                <MapPin className="w-3.5 h-3.5 flex-shrink-0 text-amber-400" />
+                <span style={{ textDecoration: 'line-through', color: 'var(--text-muted)' }}>{(event.old_rooms as { room_number?: string }).room_number}</span>
+                <ArrowRight className="w-3 h-3" style={{ color: 'var(--text-muted)' }} />
+                <span className="font-black" style={{ color: '#34d399' }}>{(event.new_rooms as { room_number?: string }).room_number}</span>
+              </div>
+              {/* Building info for new room */}
+              {newRoomInfo && (
+                <div className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-xl"
+                  style={{ background: 'rgba(52,211,153,0.08)', border: '1px solid rgba(52,211,153,0.2)', color: '#34d399' }}>
+                  <span>{newRoomInfo.emoji}</span>
+                  <span className="font-bold">{newRoomInfo.building}</span>
+                  <span style={{ opacity: 0.4 }}>·</span>
+                  <span>{newRoomInfo.floor}</span>
+                  <span style={{ opacity: 0.4 }}>·</span>
+                  <span>Room {newRoomInfo.roomNum}</span>
+                </div>
+              )}
+              {oldRoomInfo && (
+                <div className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-xl"
+                  style={{ background: 'rgba(244,63,94,0.06)', border: '1px solid rgba(244,63,94,0.15)', color: 'var(--text-muted)' }}>
+                  <span>{oldRoomInfo.emoji}</span>
+                  <span style={{ textDecoration: 'line-through' }}>{oldRoomInfo.building} · {oldRoomInfo.floor}</span>
+                </div>
+              )}
             </div>
           )}
           {(event.event_date || event.start_time) && (
