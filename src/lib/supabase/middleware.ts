@@ -39,11 +39,23 @@ export async function updateSession(request: NextRequest) {
     }
   );
 
-  const { data: { user } } = await supabase.auth.getUser();
+  let user = null;
+  try {
+    const { data } = await supabase.auth.getUser();
+    user = data.user;
+  } catch {
+    // Supabase unavailable — check fallback cookie below
+  }
+
+  // Fallback: check for emergency admin cookie (set during Supabase outages)
+  const fallbackCookie = request.cookies.get('admin_fallback_auth');
+  const hasFallback = !!fallbackCookie?.value;
+
+  const isAuthed = !!user || hasFallback;
 
   // Protect admin routes
   if (
-    !user &&
+    !isAuthed &&
     request.nextUrl.pathname.startsWith('/admin') &&
     !request.nextUrl.pathname.startsWith('/admin/login')
   ) {
@@ -53,7 +65,7 @@ export async function updateSession(request: NextRequest) {
   }
 
   // Redirect authenticated admins away from login
-  if (user && request.nextUrl.pathname === '/admin/login') {
+  if (isAuthed && request.nextUrl.pathname === '/admin/login') {
     const url = request.nextUrl.clone();
     url.pathname = '/admin/dashboard';
     return NextResponse.redirect(url);

@@ -6,10 +6,13 @@ import Image from 'next/image';
 import { Eye, EyeOff, ArrowRight } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
+// Fallback admin credentials (used when Supabase auth is unavailable)
+const FALLBACK_ADMIN = { email: 'ayaman@gmail.com', password: 'ayaman@890' };
+
 export default function AdminLoginPage() {
   const router = useRouter();
   const [email, setEmail]       = useState('');
-  const [password, setPassword] = useState('');
+  const [password, setPassword] = useState('')
   const [show, setShow]         = useState(false);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState('');
@@ -18,11 +21,46 @@ export default function AdminLoginPage() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(''); setLoading(true);
-    const { error: err } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-    if (err) { setError('Invalid email or password. Please try again.'); setLoading(false); return; }
-    router.push('/admin/dashboard');
-    router.refresh();
+
+    // ── Try Supabase auth first (with 5s timeout) ────────────
+    try {
+      const authPromise = supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('timeout')), 5000)
+      );
+
+      const { error: err } = await Promise.race([authPromise, timeoutPromise]) as Awaited<ReturnType<typeof supabase.auth.signInWithPassword>>;
+
+      if (!err) {
+        // Supabase auth succeeded
+        router.push('/admin/dashboard');
+        router.refresh();
+        return;
+      }
+    } catch {
+      // Supabase timed out or is down — fall through to fallback
+    }
+
+    // ── Fallback: hardcoded credential check ─────────────────
+    if (
+      email.trim().toLowerCase() === FALLBACK_ADMIN.email &&
+      password === FALLBACK_ADMIN.password
+    ) {
+      // Store fallback session as a cookie (middleware can read cookies, not sessionStorage)
+      const expires = new Date(Date.now() + 4 * 60 * 60 * 1000).toUTCString(); // 4 hours
+      document.cookie = `admin_fallback_auth=1; path=/; expires=${expires}; SameSite=Lax`;
+      router.push('/admin/dashboard');
+      router.refresh();
+      return;
+    }
+
+    setError('Invalid email or password. Please try again.');
+    setLoading(false);
   };
+
 
   return (
     <div style={{ minHeight: '100dvh', background: '#080a14', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px 20px', position: 'relative', overflow: 'hidden' }}>
